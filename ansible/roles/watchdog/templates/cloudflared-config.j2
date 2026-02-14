@@ -1,0 +1,7 @@
+tunnel: {{ watchdog_tunnel_uuid }}
+credentials-file: /etc/cloudflared/{{ watchdog_tunnel_uuid }}.json
+
+ingress:
+  - hostname: {{ watchdog_status_hostname }}
+    service: http://vps-git-kuma:3001
+  - service: http_status:404

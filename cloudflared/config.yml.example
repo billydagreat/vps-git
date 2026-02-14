@@ -1,0 +1,7 @@
+tunnel: vps-git
+credentials-file: /etc/cloudflared/YOUR-TUNNEL-UUID.json
+
+ingress:
+  - hostname: git.example.com
+    service: http://forgejo:3000
+  - service: http_status:404

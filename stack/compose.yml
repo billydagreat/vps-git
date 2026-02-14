@@ -1,0 +1,107 @@
+# vps-git service stack
+#
+# Primary:  COMPOSE_PROFILES=primary docker compose --env-file .env up -d
+# Standby:  COMPOSE_PROFILES=standby docker compose --env-file .env up -d
+
+services:
+
+  postgres:
+    image: postgres:16-alpine
+    container_name: vps-git-postgres
+    restart: unless-stopped
+    profiles: ["primary", "standby"]
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      REPL_USER: ${REPL_USER}
+      REPL_PASSWORD: ${REPL_PASSWORD}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./postgres/init-replication.sh:/docker-entrypoint-initdb.d/init-replication.sh:ro
+    ports:
+      - "${PG_BIND:-127.0.0.1}:5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+    command: >-
+      postgres
+      -c wal_level=replica
+      -c max_wal_senders=5
+      -c wal_keep_size=256MB
+      -c hot_standby=on
+      -c listen_addresses='*'
+
+  forgejo:
+    image: ${FORGE_IMAGE:-codeberg.org/forgejo/forgejo:11}
+    container_name: vps-git-forgejo
+    restart: unless-stopped
+    profiles: ["primary"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      FORGEJO__server__APP_NAME: ${APP_NAME}
+      FORGEJO__server__ROOT_URL: ${APP_URL}
+      FORGEJO__server__HTTP_PORT: "3000"
+      FORGEJO__database__DB_TYPE: postgres
+      FORGEJO__database__HOST: postgres:5432
+      FORGEJO__database__NAME: ${POSTGRES_DB}
+      FORGEJO__database__USER: ${POSTGRES_USER}
+      FORGEJO__database__PASSWD: ${POSTGRES_PASSWORD}
+    volumes:
+      - forgejo_data:/data
+      - /etc/timezone:/etc/timezone:ro
+      - /etc/localtime:/etc/localtime:ro
+    ports:
+      - "127.0.0.1:3000:3000"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:3000/api/healthz || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    container_name: vps-git-cloudflared
+    restart: unless-stopped
+    profiles: ["primary"]
+    depends_on:
+      forgejo:
+        condition: service_healthy
+    command: >-
+      tunnel --no-autoupdate
+      --config /etc/cloudflared/config.yml
+      run
+    volumes:
+      - ../cloudflared:/etc/cloudflared:ro
+
+  backup:
+    build: ./backup
+    container_name: vps-git-backup
+    restart: unless-stopped
+    profiles: ["primary"]
+    network_mode: host
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      PGHOST: 127.0.0.1
+      PGUSER: ${POSTGRES_USER}
+      PGPASSWORD: ${POSTGRES_PASSWORD}
+      PGDATABASE: ${POSTGRES_DB}
+      PEER_HOST: ${PEER_HOST}
+      BACKUP_INTERVAL: ${BACKUP_INTERVAL:-900}
+    volumes:
+      - forgejo_data:/data/forgejo:ro
+      - backup_data:/backups
+      - ${BACKUP_SSH_KEY:-/dev/null}:/root/.ssh/id_key:ro
+
+volumes:
+  postgres_data:
+  forgejo_data:
+  backup_data:

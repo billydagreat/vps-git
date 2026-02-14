@@ -1,0 +1,7 @@
+tunnel: YOUR-TUNNEL-UUID
+credentials-file: /etc/cloudflared/YOUR-TUNNEL-UUID.json
+
+ingress:
+  - hostname: status.example.com
+    service: http://vps-git-kuma:3001
+  - service: http_status:404

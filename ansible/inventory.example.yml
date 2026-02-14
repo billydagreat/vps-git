@@ -1,0 +1,101 @@
+---
+# Copy to ansible/inventory.yml and fill in your values.
+# Never commit inventory.yml (it's in .gitignore).
+
+all:
+  vars:
+    # Where vps-git lives on each node
+    vps_git_dir: /opt/vps-git
+    # Git repo to clone
+    vps_git_repo: https://github.com/youruser/vps-git.git
+
+    # Shared secrets (same on both nodes)
+    postgres_db: forgejo
+    postgres_user: forgejo
+    postgres_password: "CHANGEME"
+    repl_user: replicator
+    repl_password: "CHANGEME"
+
+    # App config
+    app_name: vps-git
+    app_url: "https://git.example.com"
+    forge_image: "codeberg.org/forgejo/forgejo:11"
+
+    # Forgejo admin user (created on first deploy)
+    forgejo_admin_user: "admin"
+    forgejo_admin_password: "CHANGEME"
+    forgejo_admin_email: "admin@example.com"
+
+    # Forgejo security
+    forgejo_disable_registration: true    # no public sign-ups
+    forgejo_require_signin: true          # must log in to see anything
+    forgejo_default_private: "private"    # new repos are private by default (private/public)
+
+    # Backup -- how often (in seconds) the sidecar runs pg_dump + rsync to standby.
+    # This is the max data loss window for git repo files on disk.
+    # Database replicates in real-time regardless of this value.
+    #   60  = every minute  (recommended for active repos)
+    #   300 = every 5 min
+    #   900 = every 15 min  (lighter on resources)
+    backup_interval: 60
+    backup_ssh_key: /root/.ssh/id_ed25519
+
+    # Cloudflare tunnel
+    tunnel_name: vps-git
+    tunnel_credentials_file: ""  # e.g. your-tunnel-uuid.json
+
+  children:
+    primary:
+      hosts:
+        primary-vps:
+          ansible_host: 203.0.113.10        # public or NetBird IP
+          ansible_user: root
+          ansible_ssh_private_key_file: ~/.ssh/id_ed25519
+          # NetBird IP that the standby uses to reach this node
+          netbird_ip: 100.x.x.x
+          peer_host: 100.y.y.y              # standby's NetBird IP
+          pg_bind: "0.0.0.0"
+
+    standby:
+      hosts:
+        standby-vps:
+          ansible_host: 198.51.100.20       # public or NetBird IP
+          ansible_user: root
+          ansible_ssh_private_key_file: ~/.ssh/id_ed25519
+          netbird_ip: 100.y.y.y
+          peer_host: 100.x.x.x              # primary's NetBird IP
+          pg_bind: "0.0.0.0"
+
+    # Watchdog -- Uptime Kuma + failover agent + cloudflared tunnel.
+    # Use localhost for local deployment, or a remote host for a 3rd VPS.
+    watchdog:
+      hosts:
+        localhost:
+          ansible_connection: local
+
+          # Path to the watchdog/ directory (local checkout)
+          watchdog_dir: /path/to/vps-git/watchdog
+          # Path to the repo root (for failover agent's Ansible access)
+          watchdog_repo_dir: /path/to/vps-git
+
+          # SSH keys the failover agent uses to reach VPS nodes
+          watchdog_ssh_key_primary: /path/to/primary_ssh_key
+          watchdog_ssh_key_standby: /path/to/standby_ssh_key
+
+          # Cloudflare tunnel for Uptime Kuma status page
+          watchdog_tunnel_uuid: "your-status-tunnel-uuid"
+          watchdog_tunnel_credentials_file: /path/to/tunnel-uuid.json
+          watchdog_tunnel_cert_file: ~/.cloudflared/cert.pem
+          watchdog_status_hostname: "status-git.example.com"
+
+          # Uptime Kuma admin (created on first run)
+          kuma_username: admin
+          kuma_password: "CHANGEME"
+
+          # NetBird IPs for port monitors
+          primary_netbird_ip: 100.x.x.x
+          standby_netbird_ip: 100.y.y.y
+
+          # Failover tuning
+          watchdog_check_interval: 30
+          watchdog_fail_threshold: 3

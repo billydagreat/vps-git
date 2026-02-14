@@ -1,0 +1,32 @@
+---
+# Deploy the watchdog stack (Uptime Kuma + failover + cloudflared).
+#
+# The watchdog can run on localhost or a remote 3rd VPS.
+# Set the target in your inventory under the "watchdog" group.
+#
+# Usage:
+#   ansible-playbook watchdog.yml
+#
+# Localhost example (inventory.yml):
+#   watchdog:
+#     hosts:
+#       localhost:
+#         ansible_connection: local
+#         watchdog_dir: /path/to/vps-git/watchdog
+#         watchdog_repo_dir: /path/to/vps-git
+#         ...
+#
+# Remote 3rd VPS example (inventory.yml):
+#   watchdog:
+#     hosts:
+#       watchdog-vps:
+#         ansible_host: 203.0.113.50
+#         ansible_user: root
+#         watchdog_dir: /opt/vps-git/watchdog
+#         watchdog_repo_dir: /opt/vps-git
+#         ...
+
+- name: Deploy watchdog
+  hosts: watchdog
+  roles:
+    - watchdog

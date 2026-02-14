@@ -1,0 +1,184 @@
+---
+- name: Determine node role
+  set_fact:
+    node_role: "{{ 'primary' if inventory_hostname in groups.get('primary', []) else 'standby' }}"
+
+- name: Create vps-git directory
+  file:
+    path: "{{ vps_git_dir }}"
+    state: directory
+    mode: "0755"
+
+- name: Clone / update vps-git repo
+  git:
+    repo: "{{ vps_git_repo }}"
+    dest: "{{ vps_git_dir }}"
+    version: main
+    force: yes
+
+- name: Create cloudflared directory
+  file:
+    path: "{{ vps_git_dir }}/cloudflared"
+    state: directory
+    mode: "0755"
+
+- name: Create backup receive directories (standby)
+  file:
+    path: "{{ vps_git_dir }}/backups/{{ item }}"
+    state: directory
+    mode: "0755"
+  loop:
+    - forgejo
+  when: node_role == "standby"
+
+- name: Template .env file
+  template:
+    src: env.j2
+    dest: "{{ vps_git_dir }}/stack/.env"
+    mode: "0600"
+
+- name: Template cloudflared config
+  template:
+    src: cloudflared-config.j2
+    dest: "{{ vps_git_dir }}/cloudflared/config.yml"
+    mode: "0644"
+
+- name: Copy tunnel credentials
+  copy:
+    src: "{{ tunnel_credentials_file }}"
+    dest: "{{ vps_git_dir }}/cloudflared/{{ tunnel_credentials_file | basename }}"
+    mode: "0644"
+  when: tunnel_credentials_file | length > 0
+
+- name: Copy origin cert (cert.pem)
+  copy:
+    src: "{{ tunnel_cert_file | default('~/.cloudflared/cert.pem') }}"
+    dest: "{{ vps_git_dir }}/cloudflared/cert.pem"
+    mode: "0644"
+
+- name: Build backup container image
+  shell: docker build -t vps-git-backup "{{ vps_git_dir }}/stack/backup"
+  changed_when: true
+
+- name: Stop existing stack
+  shell: >
+    cd {{ vps_git_dir }}/stack &&
+    docker compose --env-file .env --profile primary --profile standby down 2>/dev/null || true
+  changed_when: true
+
+- name: Initialize standby Postgres (pg_basebackup)
+  shell: |
+    docker volume rm stack_postgres_data 2>/dev/null || true
+    docker volume create stack_postgres_data
+    docker run --rm --network host \
+      -v stack_postgres_data:/target \
+      -e PGPASSWORD="{{ repl_password }}" \
+      postgres:16-alpine \
+      pg_basebackup -h "{{ peer_host }}" -U "{{ repl_user }}" -D /target -Fp -Xs -P -R
+  when: node_role == "standby" and init_standby_pg | default(false) | bool
+
+- name: Start stack (primary)
+  shell: >
+    cd {{ vps_git_dir }}/stack &&
+    COMPOSE_PROFILES=primary docker compose --env-file .env up -d --build
+  when: node_role == "primary"
+
+- name: Start stack (standby)
+  shell: >
+    cd {{ vps_git_dir }}/stack &&
+    COMPOSE_PROFILES=standby docker compose --env-file .env up -d --build
+  when: node_role == "standby"
+
+- name: Wait for Postgres to be healthy
+  shell: docker exec vps-git-postgres pg_isready -U {{ postgres_user }} -d {{ postgres_db }}
+  register: pg_ready
+  retries: 15
+  delay: 3
+  until: pg_ready.rc == 0
+  changed_when: false
+
+- name: Wait for Forgejo health (primary only)
+  uri:
+    url: "http://127.0.0.1:3000/api/healthz"
+    method: GET
+    status_code: 200
+  register: health
+  retries: 30
+  delay: 5
+  until: health.status == 200
+  when: node_role == "primary"
+
+- name: Check if Forgejo install lock is set
+  shell: >
+    docker exec vps-git-forgejo
+    grep -q 'INSTALL_LOCK.*=.*true' /data/gitea/conf/app.ini && echo "locked" || echo "unlocked"
+  register: install_lock
+  changed_when: false
+  when: node_role == "primary"
+
+- name: Set Forgejo install lock
+  shell: >
+    docker exec vps-git-forgejo
+    sed -i 's/INSTALL_LOCK.*/INSTALL_LOCK = true/' /data/gitea/conf/app.ini
+  when: node_role == "primary" and install_lock.stdout | trim == "unlocked"
+
+- name: Restart Forgejo after install lock
+  shell: docker restart vps-git-forgejo
+  when: node_role == "primary" and install_lock.stdout | trim == "unlocked"
+
+- name: Wait for Forgejo after restart
+  uri:
+    url: "http://127.0.0.1:3000/api/healthz"
+    method: GET
+    status_code: 200
+  register: health2
+  retries: 30
+  delay: 5
+  until: health2.status == 200
+  when: node_role == "primary" and install_lock.stdout | trim == "unlocked"
+
+- name: Create Forgejo admin user
+  shell: >
+    docker exec --user git vps-git-forgejo
+    forgejo admin user create
+    --admin
+    --username "{{ forgejo_admin_user }}"
+    --password "{{ forgejo_admin_password }}"
+    --email "{{ forgejo_admin_email }}"
+  register: admin_create
+  failed_when: admin_create.rc != 0 and 'already exists' not in admin_create.stdout
+  changed_when: admin_create.rc == 0
+  when: node_role == "primary"
+
+- name: Harden Forgejo security settings
+  shell: |
+    docker exec vps-git-forgejo sh -c '
+      ini=/data/gitea/conf/app.ini
+
+      # Disable public registration
+      sed -i "s/DISABLE_REGISTRATION.*/DISABLE_REGISTRATION = {{ forgejo_disable_registration | default(true) | string | lower }}/" "$ini"
+
+      # Require sign-in to view anything
+      sed -i "s/REQUIRE_SIGNIN_VIEW.*/REQUIRE_SIGNIN_VIEW = {{ forgejo_require_signin | default(true) | string | lower }}/" "$ini"
+
+      # Default visibility for new repos
+      grep -q "DEFAULT_PRIVATE" "$ini" || sed -i "/\[repository\]/a DEFAULT_PRIVATE = {{ forgejo_default_private | default(\"private\") }}" "$ini"
+    '
+  register: harden
+  changed_when: true
+  when: node_role == "primary"
+
+- name: Restart Forgejo after hardening
+  shell: docker restart vps-git-forgejo
+  when: node_role == "primary" and harden.changed
+
+- name: Wait for Forgejo after hardening
+  uri:
+    url: "http://127.0.0.1:3000/api/healthz"
+    method: GET
+    status_code: 200
+  register: health3
+  retries: 30
+  delay: 5
+  until: health3.status == 200
+  when: node_role == "primary" and harden.changed

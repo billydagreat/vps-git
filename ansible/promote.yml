@@ -1,0 +1,89 @@
+---
+# Promote the standby node to primary.
+# Run this when the current primary is down.
+#
+# Usage:
+#   ansible-playbook promote.yml
+#
+# What it does:
+#   1. Stops any running containers on standby
+#   2. Promotes Postgres out of recovery
+#   3. Restores Forgejo data from last backup sync
+#   4. Starts the full primary stack
+#   5. Verifies Forgejo is healthy
+
+- name: Promote standby to primary
+  hosts: standby
+  become: true
+  tasks:
+    - name: Stop standby stack
+      shell: >
+        cd {{ vps_git_dir }}/stack &&
+        COMPOSE_PROFILES=standby
+        docker compose --env-file .env down
+      ignore_errors: true
+
+    - name: Check Postgres volume exists
+      shell: docker volume inspect stack_postgres_data
+      register: pg_vol
+      ignore_errors: true
+
+    - name: Remove standby.signal to promote Postgres
+      shell: |
+        PG_PATH=$(docker volume inspect stack_postgres_data -f '{{ '{{' }}.Mountpoint{{ '}}' }}')
+        rm -f "$PG_PATH/standby.signal"
+        echo "Removed standby.signal from $PG_PATH"
+      when: pg_vol.rc == 0
+
+    - name: Restore Forgejo data from backup sync
+      shell: |
+        SYNC_DIR="{{ vps_git_dir }}/backups/forgejo"
+        if [ -d "$SYNC_DIR" ] && [ "$(ls -A "$SYNC_DIR" 2>/dev/null)" ]; then
+          FG_PATH=$(docker volume inspect stack_forgejo_data -f '{{ '{{' }}.Mountpoint{{ '}}' }}' 2>/dev/null || echo "")
+          if [ -z "$FG_PATH" ]; then
+            docker volume create stack_forgejo_data
+            FG_PATH=$(docker volume inspect stack_forgejo_data -f '{{ '{{' }}.Mountpoint{{ '}}' }}')
+          fi
+          rsync -a --delete "$SYNC_DIR/" "$FG_PATH/"
+          echo "Forgejo data restored from sync."
+        else
+          echo "No synced Forgejo data found. Will use existing volume or start fresh."
+        fi
+      register: forgejo_restore
+
+    - name: Display Forgejo restore result
+      debug:
+        msg: "{{ forgejo_restore.stdout }}"
+
+    - name: Switch .env to primary mode
+      lineinfile:
+        path: "{{ vps_git_dir }}/stack/.env"
+        regexp: "{{ item.re }}"
+        line: "{{ item.line }}"
+      loop:
+        - { re: '^ROLE=', line: 'ROLE=primary' }
+        - { re: '^COMPOSE_PROFILES=', line: 'COMPOSE_PROFILES=primary' }
+
+    - name: Start primary stack
+      shell: >
+        cd {{ vps_git_dir }}/stack &&
+        COMPOSE_PROFILES=primary
+        docker compose --env-file .env up -d
+      register: stack_up
+
+    - name: Wait for Forgejo to be healthy
+      uri:
+        url: "http://127.0.0.1:3000/api/healthz"
+        method: GET
+        status_code: 200
+      register: health
+      retries: 30
+      delay: 5
+      until: health.status == 200
+
+    - name: Failover complete
+      debug:
+        msg: >-
+          Failover complete. This node is now the primary.
+          Forgejo is healthy at http://127.0.0.1:3000.
+          The Cloudflare tunnel will route traffic here automatically.

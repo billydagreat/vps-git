@@ -1,0 +1,33 @@
+# Secrets
+*.key
+*.pem
+*.p12
+*.pfx
+cloudflared/*.json
+cloudflared/*token*
+secrets/
+
+# Env files (contain passwords)
+**/.env
+
+# Runtime / volumes
+**/data/
+**/volumes/
+
+# Ansible
+ansible/inventory.yml
+ansible/*.retry
+ansible/.vault_pass
+
+# OS / editor
+.DS_Store
+.idea/
+.vscode/
+*.swp
+*~
+
+# Watchdog runtime
+watchdog/kuma-data/
+watchdog/cloudflared/*.json
+watchdog/cloudflared/*.pem
+watchdog/cloudflared/config.yml

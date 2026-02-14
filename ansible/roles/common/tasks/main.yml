@@ -1,0 +1,61 @@
+---
+- name: Update apt cache
+  apt:
+    update_cache: yes
+    cache_valid_time: 3600
+
+- name: Install base packages
+  apt:
+    name:
+      - curl
+      - rsync
+      - git
+      - ca-certificates
+      - gnupg
+    state: present
+
+- name: Check if Docker is installed
+  command: docker --version
+  register: docker_check
+  ignore_errors: true
+  changed_when: false
+
+- name: Install Docker (if not present)
+  when: docker_check.rc != 0
+  block:
+    - name: Add Docker GPG key
+      shell: |
+        install -m 0755 -d /etc/apt/keyrings
+        curl -fsSL https://download.docker.com/linux/{{ ansible_distribution | lower }}/gpg \
+          -o /etc/apt/keyrings/docker.asc
+        chmod a+r /etc/apt/keyrings/docker.asc
+      args:
+        creates: /etc/apt/keyrings/docker.asc
+
+    - name: Add Docker apt repository
+      shell: |
+        echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] \
+        https://download.docker.com/linux/{{ ansible_distribution | lower }} \
+        $(. /etc/os-release && echo $VERSION_CODENAME) stable" \
+        > /etc/apt/sources.list.d/docker.list
+      args:
+        creates: /etc/apt/sources.list.d/docker.list
+
+    - name: Update apt after adding Docker repo
+      apt:
+        update_cache: yes
+
+    - name: Install Docker packages
+      apt:
+        name:
+          - docker-ce
+          - docker-ce-cli
+          - containerd.io
+          - docker-compose-plugin
+        state: present
+
+- name: Ensure Docker is running
+  systemd:
+    name: docker
+    state: started
+    enabled: true

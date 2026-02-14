@@ -1,0 +1,184 @@
+---
+# Deploy the watchdog stack (Uptime Kuma + failover agent + cloudflared).
+# Works on both localhost and a remote 3rd VPS.
+#
+# Required vars:
+#   watchdog_dir              - where the watchdog stack lives (e.g. /opt/vps-git/watchdog)
+#   watchdog_ssh_key_primary  - SSH private key path that can reach primary VPS
+#   watchdog_ssh_key_standby  - SSH private key path that can reach standby VPS
+#   watchdog_tunnel_uuid      - Cloudflare tunnel UUID for status page
+#   watchdog_tunnel_credentials_file - path to tunnel credentials JSON
+#   watchdog_status_hostname  - hostname for Uptime Kuma (e.g. status-git.example.com)
+#   kuma_username / kuma_password - Uptime Kuma admin credentials
+#   primary_netbird_ip / standby_netbird_ip - NetBird IPs for monitors
+#   app_url                   - Forgejo public URL (for health check)
+
+- name: Determine if running locally
+  set_fact:
+    watchdog_is_local: "{{ inventory_hostname in ['localhost', '127.0.0.1'] or ansible_connection | default('') == 'local' }}"
+
+# --- Remote deployment: install Docker + clone repo ---
+
+- name: Install Docker (remote only)
+  when: not watchdog_is_local | bool
+  block:
+    - name: Update apt cache
+      apt:
+        update_cache: yes
+        cache_valid_time: 3600
+
+    - name: Install base packages
+      apt:
+        name: [curl, git, ca-certificates, gnupg]
+        state: present
+
+    - name: Check if Docker is installed
+      command: docker --version
+      register: docker_check
+      ignore_errors: true
+      changed_when: false
+
+    - name: Install Docker (if not present)
+      when: docker_check.rc != 0
+      block:
+        - name: Add Docker GPG key
+          shell: |
+            install -m 0755 -d /etc/apt/keyrings
+            curl -fsSL https://download.docker.com/linux/{{ ansible_distribution | lower }}/gpg \
+              -o /etc/apt/keyrings/docker.asc
+            chmod a+r /etc/apt/keyrings/docker.asc
+          args:
+            creates: /etc/apt/keyrings/docker.asc
+
+        - name: Add Docker apt repository
+          shell: |
+            echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] \
+            https://download.docker.com/linux/{{ ansible_distribution | lower }} \
+            $(. /etc/os-release && echo $VERSION_CODENAME) stable" \
+            > /etc/apt/sources.list.d/docker.list
+          args:
+            creates: /etc/apt/sources.list.d/docker.list
+
+        - name: Update apt after adding Docker repo
+          apt:
+            update_cache: yes
+
+        - name: Install Docker packages
+          apt:
+            name: [docker-ce, docker-ce-cli, containerd.io, docker-compose-plugin]
+            state: present
+
+    - name: Ensure Docker is running
+      systemd:
+        name: docker
+        state: started
+        enabled: true
+
+- name: Clone / update vps-git repo (remote only)
+  git:
+    repo: "{{ vps_git_repo }}"
+    dest: "{{ watchdog_repo_dir }}"
+    version: main
+    force: yes
+  when: not watchdog_is_local | bool
+
+# --- Common setup (both local and remote) ---
+
+- name: Create cloudflared config directory
+  file:
+    path: "{{ watchdog_dir }}/cloudflared"
+    state: directory
+    mode: "0755"
+
+- name: Template watchdog .env
+  template:
+    src: watchdog-env.j2
+    dest: "{{ watchdog_dir }}/.env"
+    mode: "0600"
+
+- name: Template cloudflared config
+  template:
+    src: cloudflared-config.j2
+    dest: "{{ watchdog_dir }}/cloudflared/config.yml"
+    mode: "0644"
+
+- name: Copy tunnel credentials JSON
+  copy:
+    src: "{{ watchdog_tunnel_credentials_file }}"
+    dest: "{{ watchdog_dir }}/cloudflared/{{ watchdog_tunnel_uuid }}.json"
+    mode: "0644"
+
+- name: Copy tunnel origin cert (cert.pem)
+  copy:
+    src: "{{ watchdog_tunnel_cert_file | default('~/.cloudflared/cert.pem') }}"
+    dest: "{{ watchdog_dir }}/cloudflared/cert.pem"
+    mode: "0644"
+
+- name: Copy Ansible inventory for failover agent
+  copy:
+    src: "{{ playbook_dir }}/inventory.yml"
+    dest: "{{ watchdog_repo_dir }}/ansible/inventory.yml"
+    mode: "0600"
+  when: not watchdog_is_local | bool
+
+- name: Stop existing watchdog stack
+  shell: >
+    docker compose --env-file .env down 2>/dev/null || true
+  args:
+    chdir: "{{ watchdog_dir }}"
+  changed_when: true
+
+- name: Build and start watchdog stack
+  shell: >
+    docker compose --env-file .env up -d --build
+  args:
+    chdir: "{{ watchdog_dir }}"
+  register: watchdog_up
+
+- name: Wait for Uptime Kuma to be ready
+  uri:
+    url: "http://127.0.0.1:3001"
+    method: GET
+    status_code: [200, 301, 302]
+  register: kuma_health
+  retries: 20
+  delay: 5
+  until: kuma_health.status | default(-1) | int > 0
+  ignore_errors: false
+  failed_when: false
+
+- name: Fail if Uptime Kuma never became ready
+  fail:
+    msg: "Uptime Kuma did not become ready after retries. Last status: {{ kuma_health.status | default('N/A') }}"
+  when: kuma_health.status | default(-1) | int <= 0
+
+- name: Build setup-kuma image
+  shell: >
+    docker compose --env-file .env build setup-kuma
+  args:
+    chdir: "{{ watchdog_dir }}"
+  changed_when: true
+
+- name: Run setup-kuma to configure monitors and status page
+  shell: >
+    docker compose --env-file .env run --rm setup-kuma
+    --url http://localhost:3001
+    --username "{{ kuma_username }}"
+    --password "{{ kuma_password }}"
+    --health-url "{{ app_url }}/api/healthz"
+    --primary-host "{{ primary_netbird_ip }}"
+    --standby-host "{{ standby_netbird_ip }}"
+  args:
+    chdir: "{{ watchdog_dir }}"
+  register: kuma_setup
+
+- name: Display Kuma setup result
+  debug:
+    msg: "{{ kuma_setup.stdout_lines }}"
+
+- name: Watchdog deployed
+  debug:
+    msg: >-
+      Watchdog stack is running.
+      Uptime Kuma: http://127.0.0.1:3001 (or https://{{ watchdog_status_hostname }})
+      Failover agent: monitoring {{ app_url }}/api/healthz every {{ watchdog_check_interval | default(30) }}s

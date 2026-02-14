@@ -1,0 +1,7 @@
+tunnel: {{ tunnel_name }}
+credentials-file: /etc/cloudflared/{{ tunnel_credentials_file | basename }}
+
+ingress:
+  - hostname: {{ app_url | regex_replace('^https?://', '') }}
+    service: http://forgejo:3000
+  - service: http_status:404
